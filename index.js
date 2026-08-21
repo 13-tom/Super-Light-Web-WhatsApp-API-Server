@@ -608,7 +608,10 @@ if (typeof schedulerInterval.unref === 'function') schedulerInterval.unref();
     // Ensure default admin exists
     await User.ensureAdmin(process.env.ADMIN_DASHBOARD_PASSWORD);
 
-    // Sync sessions from disk to DB
+    // Load session metadata from Supabase (survives restarts)
+    await Session.hydrate();
+
+    // Sync sessions from disk to DB (no-op now; kept for compatibility)
     Session.syncWithFilesystem();
 
     const existingSessions = Session.getAll();
