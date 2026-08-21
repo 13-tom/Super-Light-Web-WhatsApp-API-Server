@@ -5,7 +5,6 @@
 
 const {
     default: makeWASocket,
-    useMultiFileAuthState,
     fetchLatestBaileysVersion,
     fetchLatestWaWebVersion,
     makeCacheableSignalKeyStore,
@@ -19,6 +18,7 @@ const path = require('path');
 const fs = require('fs');
 const Session = require('../models/Session');
 const ActivityLog = require('../models/ActivityLog');
+const { useSupabaseAuthState, clearSessionData } = require('./supabaseAuthState');
 
 // Logger configuration
 const defaultLogLevel = process.env.NODE_ENV === 'production' ? 'silent' : 'warn';
@@ -53,13 +53,6 @@ async function connect(sessionId, onUpdate, onMessage) {
         throw new Error('Invalid session ID');
     }
 
-    ensureAuthDir();
-
-    const sessionDir = path.join(AUTH_DIR, sessionId);
-    if (!fs.existsSync(sessionDir)) {
-        fs.mkdirSync(sessionDir, { recursive: true });
-    }
-
     // Clear any pending reconnection timer for this session
     if (reconnectTimeouts.has(sessionId)) {
         clearTimeout(reconnectTimeouts.get(sessionId));
@@ -82,7 +75,7 @@ async function connect(sessionId, onUpdate, onMessage) {
     Session.updateStatus(sessionId, 'CONNECTING', 'Initializing...');
     if (onUpdate) onUpdate(sessionId, 'CONNECTING', 'Initializing...', null);
 
-    const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+    const { state, saveCreds } = await useSupabaseAuthState(sessionId);
 
     // Get latest WA version (with fallback)
     let version;
@@ -181,9 +174,7 @@ async function connect(sessionId, onUpdate, onMessage) {
                 // Clear session data on logout
                 if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
                     console.log(`[${sessionId}] Logged out, cleaning session data`);
-                    if (fs.existsSync(sessionDir)) {
-                        fs.rmSync(sessionDir, { recursive: true, force: true });
-                    }
+                    await clearSessionData(sessionId);
                 }
             }
 
@@ -397,10 +388,9 @@ function deleteSessionData(sessionId) {
 
     disconnect(sessionId);
 
-    const sessionDir = path.join(AUTH_DIR, sessionId);
-    if (fs.existsSync(sessionDir)) {
-        fs.rmSync(sessionDir, { recursive: true, force: true });
-    }
+    clearSessionData(sessionId).catch((err) =>
+        console.error(`[${sessionId}] Failed to clear Supabase auth data:`, err.message)
+    );
 
     Session.delete(sessionId);
 }
